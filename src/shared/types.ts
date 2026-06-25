@@ -67,6 +67,7 @@ export interface AppApi {
     status: () => Promise<VirtualCameraState>
     stop: () => Promise<VirtualCameraState>
     pushFrame: (frame: FramePayload) => Promise<boolean>
+    pushFrameRaw: (frame: FramePayload) => void
   }
   store: {
     getPreferences: () => Promise<UserPreferences>

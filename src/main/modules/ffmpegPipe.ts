@@ -20,7 +20,7 @@ export class FfmpegPipe {
       '-f',
       'rawvideo',
       '-pixel_format',
-      'rgb24',
+      'rgba',
       '-video_size',
       `${settings.width}x${settings.height}`,
       '-framerate',
@@ -57,7 +57,19 @@ export class FfmpegPipe {
     if (!this.process || !this.settings) return false
     if (frame.width !== this.settings.width || frame.height !== this.settings.height) return false
 
-    const accepted = this.process.stdin.write(Buffer.from(frame.data))
+    // frame.data arrives from IPC as ArrayBuffer (structured clone).
+    // Buffer.from(ArrayBuffer) creates a zero-copy view of it.
+    let buf: Buffer
+    if (Buffer.isBuffer(frame.data)) {
+      buf = frame.data
+    } else if (frame.data instanceof ArrayBuffer) {
+      buf = Buffer.from(frame.data)
+    } else {
+      // Fallback: IPC may deserialize as a plain object with numeric keys
+      buf = Buffer.from(Object.values(frame.data as unknown as Record<string, number>))
+    }
+
+    const accepted = this.process.stdin.write(buf)
     this.framesWritten += 1
     return accepted
   }

@@ -70,6 +70,7 @@ app.whenReady().then(() => {
   )
   ipcMain.handle('virtual-camera:status', () => ffmpegPipe.status())
   ipcMain.handle('virtual-camera:frame', (_event, frame) => ffmpegPipe.pushFrame(frame))
+  ipcMain.on('virtual-camera:frame-raw', (_event, frame) => ffmpegPipe.pushFrame(frame))
   ipcMain.handle('virtual-camera:stop', () => ffmpegPipe.stop())
   ipcMain.handle('store:get-preferences', () => getPreferences())
   ipcMain.handle('store:set-preferences', (_event, preferences: UserPreferences) =>

@@ -15,7 +15,10 @@ const api: AppApi = {
     start: (settings: VirtualCameraSettings) => ipcRenderer.invoke('virtual-camera:start', settings),
     status: () => ipcRenderer.invoke('virtual-camera:status'),
     stop: () => ipcRenderer.invoke('virtual-camera:stop'),
-    pushFrame: (frame: FramePayload) => ipcRenderer.invoke('virtual-camera:frame', frame)
+    pushFrame: (frame: FramePayload) => ipcRenderer.invoke('virtual-camera:frame', frame),
+    pushFrameRaw: (frame: FramePayload) => {
+      ipcRenderer.send('virtual-camera:frame-raw', frame)
+    }
   },
   store: {
     getPreferences: () => ipcRenderer.invoke('store:get-preferences'),

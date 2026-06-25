@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VirtualCameraSettings, VirtualCameraState } from '../../../shared/types'
-import { canvasToRgbPayload } from '@renderer/lib/frameExporter'
+import { canvasToRgbaPayload } from '@renderer/lib/frameExporter'
 
 export function useVirtualCam(settings: VirtualCameraSettings): {
   state: VirtualCameraState
@@ -15,7 +15,6 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
   })
   const intervalRef = useRef<number | null>(null)
   const statusIntervalRef = useRef<number | null>(null)
-  const frameInFlightRef = useRef(false)
 
   const stopFrameLoop = useCallback(() => {
     if (intervalRef.current) {
@@ -26,7 +25,6 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
       window.clearInterval(statusIntervalRef.current)
       statusIntervalRef.current = null
     }
-    frameInFlightRef.current = false
   }, [])
 
   const stop = useCallback(async () => {
@@ -41,16 +39,8 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
       setState(await window.api.virtualCamera.start(settings))
 
       intervalRef.current = window.setInterval(() => {
-        if (frameInFlightRef.current) return
-        const payload = canvasToRgbPayload(canvas)
-        if (!payload) return
-
-        frameInFlightRef.current = true
-        void window.api.virtualCamera
-          .pushFrame(payload)
-          .finally(() => {
-            frameInFlightRef.current = false
-          })
+        const payload = canvasToRgbaPayload(canvas)
+        if (payload) window.api.virtualCamera.pushFrameRaw(payload)
       }, 1000 / settings.fps)
 
       statusIntervalRef.current = window.setInterval(() => {
