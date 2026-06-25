@@ -10,11 +10,13 @@ import { Panel } from '@renderer/components/ui/panel'
 export function CameraPreview({
   stream,
   background,
-  settings
+  settings,
+  mirrorHorizontal
 }: {
   stream: MediaStream | null
   background: BackgroundAsset
   settings: VirtualCameraSettings
+  mirrorHorizontal: boolean
 }): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -31,7 +33,8 @@ export function CameraPreview({
     outputCanvasRef,
     background,
     backgroundElement,
-    settings
+    settings,
+    mirrorHorizontal
   })
 
   useEffect(() => {
@@ -55,18 +58,10 @@ export function CameraPreview({
       </div>
 
       <div className="grid min-h-0 place-items-center bg-neutral-950 p-4">
-        {/* Video visível apenas no modo "Sem filtro" */}
-        <video
-          ref={videoRef}
-          className={`aspect-video max-h-full w-full max-w-full rounded-md bg-neutral-900 object-contain${segmentationEnabled ? ' hidden' : ''}`}
-          autoPlay
-          muted
-          playsInline
-        />
-        {/* Canvas visível apenas com segmentação ativa */}
+        <video ref={videoRef} className="hidden" autoPlay muted playsInline />
         <canvas
           ref={outputCanvasRef}
-          className={`aspect-video max-h-full w-full max-w-full rounded-md bg-neutral-900 object-contain${segmentationEnabled ? '' : ' hidden'}`}
+          className="aspect-video max-h-full w-full max-w-full rounded-md bg-neutral-900 object-contain"
           width={settings.width}
           height={settings.height}
         />

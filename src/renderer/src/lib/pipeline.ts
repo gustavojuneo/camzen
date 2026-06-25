@@ -11,6 +11,7 @@ export interface ComposeInput {
   maskWidth?: number
   maskHeight?: number
   settings: VirtualCameraSettings
+  mirrorHorizontal: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +127,11 @@ function makeBuffer(gl: WebGLRenderingContext, data: Float32Array): WebGLBuffer 
   return buf
 }
 
-function getOrCreateGlState(outputCanvas: HTMLCanvasElement, width: number, height: number): GlState | null {
+function getOrCreateGlState(
+  outputCanvas: HTMLCanvasElement,
+  width: number,
+  height: number
+): GlState | null {
   // Use a separate hidden canvas for WebGL so outputCanvas stays 2D-only
   let hidden = offscreenCache.get(outputCanvas)
   if (!hidden) {
@@ -187,11 +192,12 @@ function getOrCreateGlState(outputCanvas: HTMLCanvasElement, width: number, heig
 /** Converte hex '#rrggbb' para [r, g, b] em 0–1 */
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.replace('#', ''), 16)
-  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
 }
 
 /** Desenha background de blur no canvas 2D auxiliar e retorna ele como fonte */
 const blurCache = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D>()
+const mirrorCache = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>()
 
 function getBlurCtx(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   if (!blurCache.has(canvas)) {
@@ -203,7 +209,12 @@ function getBlurCtx(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
 // Canvas auxiliar para blur (reutilizado)
 let blurCanvas: HTMLCanvasElement | null = null
 
-function renderBlurBg(video: HTMLVideoElement, blurAmount: number, width: number, height: number): HTMLCanvasElement {
+function renderBlurBg(
+  video: HTMLVideoElement,
+  blurAmount: number,
+  width: number,
+  height: number
+): HTMLCanvasElement {
   if (!blurCanvas) {
     blurCanvas = document.createElement('canvas')
   }
@@ -214,6 +225,44 @@ function renderBlurBg(video: HTMLVideoElement, blurAmount: number, width: number
   ctx.drawImage(video, 0, 0, width, height)
   ctx.filter = 'none'
   return blurCanvas
+}
+
+function drawImage(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  width: number,
+  height: number,
+  mirrorHorizontal: boolean
+): void {
+  ctx.save()
+  if (mirrorHorizontal) {
+    ctx.translate(width, 0)
+    ctx.scale(-1, 1)
+  }
+  ctx.drawImage(image, 0, 0, width, height)
+  ctx.restore()
+}
+
+function mirrorCanvas(canvas: HTMLCanvasElement, width: number, height: number): void {
+  let mirror = mirrorCache.get(canvas)
+  if (!mirror) {
+    mirror = document.createElement('canvas')
+    mirrorCache.set(canvas, mirror)
+  }
+
+  mirror.width = width
+  mirror.height = height
+  mirror.getContext('2d')?.drawImage(canvas, 0, 0, width, height)
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, width, height)
+  ctx.translate(width, 0)
+  ctx.scale(-1, 1)
+  ctx.drawImage(mirror, 0, 0, width, height)
+  ctx.restore()
 }
 
 // (mask upload is now done directly from the Uint8Array received from the worker)
@@ -232,7 +281,7 @@ export function composeFrame(input: ComposeInput): void {
   if (!input.mask || !input.maskWidth || !input.maskHeight) {
     const ctx = input.outputCanvas.getContext('2d')
     if (!ctx) return
-    ctx.drawImage(input.video, 0, 0, width, height)
+    drawImage(ctx, input.video, width, height, input.mirrorHorizontal)
     return
   }
 
@@ -264,7 +313,17 @@ export function composeFrame(input: ComposeInput): void {
     gl.uniform3f(locations.uBgColor, r, g, b)
     gl.uniform1i(locations.uBgKind, 0)
     // Textura dummy para evitar sampler inválido
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]))
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([0, 0, 0, 255])
+    )
   } else if (input.background.kind === 'blur') {
     const blurBg = renderBlurBg(input.video, Number(input.background.value) || 18, width, height)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, blurBg)
@@ -285,20 +344,27 @@ export function composeFrame(input: ComposeInput): void {
   gl.uniform1i(locations.uBackground, 1)
 
   // --- Textura da máscara --- (Uint8Array direto do worker: 0=fundo, 255=pessoa)
-  const maskData = input.mask instanceof Uint8Array
-    ? input.mask
-    : (() => {
-        const buf = new Uint8Array(input.maskWidth * input.maskHeight)
-        for (let i = 0; i < buf.length; i++) buf[i] = Math.round((input.mask as Float32Array)[i] * 255)
-        return buf
-      })()
+  const maskData =
+    input.mask instanceof Uint8Array
+      ? input.mask
+      : (() => {
+          const buf = new Uint8Array(input.maskWidth * input.maskHeight)
+          for (let i = 0; i < buf.length; i++)
+            buf[i] = Math.round((input.mask as Float32Array)[i] * 255)
+          return buf
+        })()
 
   gl.activeTexture(gl.TEXTURE2)
   gl.bindTexture(gl.TEXTURE_2D, state.maskTexture)
   gl.texImage2D(
-    gl.TEXTURE_2D, 0, gl.LUMINANCE,
-    input.maskWidth, input.maskHeight, 0,
-    gl.LUMINANCE, gl.UNSIGNED_BYTE,
+    gl.TEXTURE_2D,
+    0,
+    gl.LUMINANCE,
+    input.maskWidth,
+    input.maskHeight,
+    0,
+    gl.LUMINANCE,
+    gl.UNSIGNED_BYTE,
     maskData
   )
   gl.uniform1i(locations.uMask, 2)
@@ -321,7 +387,7 @@ export function composeFrame(input: ComposeInput): void {
   const hidden = offscreenCache.get(input.outputCanvas)
   if (hidden) {
     const ctx2d = input.outputCanvas.getContext('2d')
-    ctx2d?.drawImage(hidden, 0, 0)
+    if (ctx2d) drawImage(ctx2d, hidden, width, height, input.mirrorHorizontal)
   }
 }
 
@@ -359,7 +425,7 @@ function composeFrame2D(input: ComposeInput): void {
   }
 
   if (!input.mask || !input.maskWidth || !input.maskHeight) {
-    outputCtx.drawImage(input.video, 0, 0, width, height)
+    drawImage(outputCtx, input.video, width, height, input.mirrorHorizontal)
     return
   }
 
@@ -375,9 +441,8 @@ function composeFrame2D(input: ComposeInput): void {
       const maskX = Math.min(input.maskWidth - 1, Math.floor(px * xScale))
       const maskIndex = maskY * input.maskWidth + maskX
       const pixelIndex = (py * width + px) * 4
-      const confidence = input.mask instanceof Float32Array
-        ? input.mask[maskIndex]
-        : input.mask[maskIndex] / 255
+      const confidence =
+        input.mask instanceof Float32Array ? input.mask[maskIndex] : input.mask[maskIndex] / 255
       const softness = Math.max(0.02, feathering / 100)
       const low = 0.5 - softness
       const high = 0.5 + softness
@@ -388,4 +453,5 @@ function composeFrame2D(input: ComposeInput): void {
 
   personCtx.putImageData(frame, 0, 0)
   outputCtx.drawImage(input.personCanvas, 0, 0)
+  if (input.mirrorHorizontal) mirrorCanvas(input.outputCanvas, width, height)
 }

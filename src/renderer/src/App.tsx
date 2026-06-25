@@ -1,4 +1,4 @@
-import { RefreshCw, Video, VideoOff } from 'lucide-react'
+import { FlipHorizontal, RefreshCw, Video, VideoOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DependencyStatus, VirtualCameraSettings } from '../../shared/types'
 import { BackgroundSelector } from '@renderer/components/BackgroundSelector/BackgroundSelector'
@@ -21,6 +21,7 @@ function App(): React.JSX.Element {
     setPreferences
   } = useBackgrounds()
   const [dependencies, setDependencies] = useState<DependencyStatus[]>([])
+  const [mirrorHorizontal, setMirrorHorizontal] = useState(false)
   const settings = preferences.settings
   const webcam = useWebcam(settings)
 
@@ -60,10 +61,28 @@ function App(): React.JSX.Element {
             onChange={(event) => webcam.setSelectedDeviceId(event.target.value)}
             disabled={!webcam.cameraEnabled}
           >
-            {cameraOptions.length ? cameraOptions : <option value="">Nenhuma camera encontrada</option>}
+            {cameraOptions.length ? (
+              cameraOptions
+            ) : (
+              <option value="">Nenhuma camera encontrada</option>
+            )}
           </Select>
-          <Button intent="ghost" size="icon" title="Atualizar cameras" onClick={webcam.refreshDevices}>
+          <Button
+            intent="ghost"
+            size="icon"
+            title="Atualizar cameras"
+            onClick={webcam.refreshDevices}
+          >
             <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button
+            intent={mirrorHorizontal ? 'secondary' : 'ghost'}
+            size="icon"
+            title={mirrorHorizontal ? 'Enviar camera espelhada' : 'Enviar camera sem espelhamento'}
+            aria-pressed={mirrorHorizontal}
+            onClick={() => setMirrorHorizontal((current) => !current)}
+          >
+            <FlipHorizontal className="h-4 w-4" />
           </Button>
           <Button
             intent={webcam.cameraEnabled ? 'secondary' : 'ghost'}
@@ -71,7 +90,11 @@ function App(): React.JSX.Element {
             title={webcam.cameraEnabled ? 'Desligar camera' : 'Ligar camera'}
             onClick={webcam.cameraEnabled ? webcam.stopCamera : webcam.startCamera}
           >
-            {webcam.cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4 text-rose-400" />}
+            {webcam.cameraEnabled ? (
+              <Video className="h-4 w-4" />
+            ) : (
+              <VideoOff className="h-4 w-4 text-rose-400" />
+            )}
           </Button>
         </div>
       </header>
@@ -84,7 +107,12 @@ function App(): React.JSX.Element {
               {webcam.error}
             </div>
           ) : null}
-          <CameraPreview stream={webcam.stream} background={selectedBackground} settings={settings} />
+          <CameraPreview
+            stream={webcam.stream}
+            background={selectedBackground}
+            settings={settings}
+            mirrorHorizontal={mirrorHorizontal}
+          />
         </div>
 
         <aside className="grid min-h-0 content-start gap-4 overflow-y-auto">

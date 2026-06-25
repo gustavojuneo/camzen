@@ -25,7 +25,8 @@ export function useSegmentation({
   personCanvasRef,
   background,
   backgroundElement,
-  settings
+  settings,
+  mirrorHorizontal
 }: {
   enabled: boolean
   videoRef: React.RefObject<HTMLVideoElement | null>
@@ -35,6 +36,7 @@ export function useSegmentation({
   background: BackgroundAsset
   backgroundElement: HTMLImageElement | HTMLVideoElement | null
   settings: VirtualCameraSettings
+  mirrorHorizontal: boolean
 }): { fps: number; status: string } {
   const [fps, setFps] = useState(0)
   const [status, setStatus] = useState('Segmentacao desligada')
@@ -157,7 +159,8 @@ export function useSegmentation({
           mask: mask?.data,
           maskWidth: mask?.width,
           maskHeight: mask?.height,
-          settings
+          settings,
+          mirrorHorizontal
         })
 
         frameCountRef.current += 1
@@ -186,6 +189,7 @@ export function useSegmentation({
     backgroundElement,
     outputCanvasRef,
     personCanvasRef,
+    mirrorHorizontal,
     settings,
     sourceCanvasRef,
     videoRef
