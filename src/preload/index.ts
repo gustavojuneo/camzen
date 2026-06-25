@@ -7,6 +7,9 @@ const api: AppApi = {
   dependencies: {
     check: () => ipcRenderer.invoke('dependencies:check')
   },
+  backgrounds: {
+    save: (sourcePath: string) => ipcRenderer.invoke('backgrounds:save', sourcePath)
+  },
   v4l2: {
     status: () => ipcRenderer.invoke('v4l2:status'),
     load: (settings: VirtualCameraSettings) => ipcRenderer.invoke('v4l2:load', settings)

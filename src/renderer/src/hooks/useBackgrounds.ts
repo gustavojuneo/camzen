@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   DEFAULT_PREFERENCES,
+  NONE_BACKGROUND,
   type BackgroundAsset,
   type UserPreferences
 } from '../../../shared/types'
@@ -26,8 +27,10 @@ export function useBackgrounds(): {
 
   const selectedBackground = useMemo(
     () =>
-      preferences.backgrounds.find((background) => background.id === preferences.selectedBackgroundId) ??
-      preferences.backgrounds[0],
+      preferences.selectedBackgroundId === 'none'
+        ? NONE_BACKGROUND
+        : (preferences.backgrounds.find((background) => background.id === preferences.selectedBackgroundId) ??
+          preferences.backgrounds[0]),
     [preferences.backgrounds, preferences.selectedBackgroundId]
   )
 

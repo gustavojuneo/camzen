@@ -9,7 +9,7 @@ export interface DependencyStatus {
   detail: string
 }
 
-export type BackgroundKind = 'solid' | 'image' | 'video' | 'blur'
+export type BackgroundKind = 'none' | 'solid' | 'image' | 'video' | 'blur'
 
 export interface BackgroundAsset {
   id: string
@@ -58,6 +58,9 @@ export interface AppApi {
   dependencies: {
     check: () => Promise<DependencyStatus[]>
   }
+  backgrounds: {
+    save: (sourcePath: string) => Promise<string>
+  }
   v4l2: {
     status: () => Promise<VirtualCameraState>
     load: (settings: VirtualCameraSettings) => Promise<VirtualCameraState>
@@ -83,6 +86,14 @@ export const DEFAULT_SETTINGS: VirtualCameraSettings = {
   feathering: 4
 }
 
+export const NONE_BACKGROUND: BackgroundAsset = {
+  id: 'none',
+  name: 'Sem filtro',
+  kind: 'none',
+  value: '',
+  builtIn: true
+}
+
 export const DEFAULT_BACKGROUNDS: BackgroundAsset[] = [
   { id: 'solid-graphite', name: 'Graphite', kind: 'solid', value: '#171717', builtIn: true },
   { id: 'solid-cyan', name: 'Cyan', kind: 'solid', value: '#0f766e', builtIn: true },
@@ -91,7 +102,7 @@ export const DEFAULT_BACKGROUNDS: BackgroundAsset[] = [
 ]
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
-  selectedBackgroundId: DEFAULT_BACKGROUNDS[0].id,
+  selectedBackgroundId: 'none',
   backgrounds: DEFAULT_BACKGROUNDS,
   settings: DEFAULT_SETTINGS,
   theme: 'system'

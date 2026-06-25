@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Video, VideoOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DependencyStatus, VirtualCameraSettings } from '../../shared/types'
 import { BackgroundSelector } from '@renderer/components/BackgroundSelector/BackgroundSelector'
@@ -58,11 +58,20 @@ function App(): React.JSX.Element {
             className="w-72"
             value={webcam.selectedDeviceId}
             onChange={(event) => webcam.setSelectedDeviceId(event.target.value)}
+            disabled={!webcam.cameraEnabled}
           >
             {cameraOptions.length ? cameraOptions : <option value="">Nenhuma camera encontrada</option>}
           </Select>
           <Button intent="ghost" size="icon" title="Atualizar cameras" onClick={webcam.refreshDevices}>
             <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button
+            intent={webcam.cameraEnabled ? 'secondary' : 'ghost'}
+            size="icon"
+            title={webcam.cameraEnabled ? 'Desligar camera' : 'Ligar camera'}
+            onClick={webcam.cameraEnabled ? webcam.stopCamera : webcam.startCamera}
+          >
+            {webcam.cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4 text-rose-400" />}
           </Button>
         </div>
       </header>

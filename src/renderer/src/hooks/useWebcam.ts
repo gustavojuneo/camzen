@@ -6,13 +6,17 @@ export function useWebcam(settings: VirtualCameraSettings): {
   selectedDeviceId: string
   stream: MediaStream | null
   error: string
+  cameraEnabled: boolean
   refreshDevices: () => Promise<void>
   setSelectedDeviceId: (deviceId: string) => void
+  stopCamera: () => void
+  startCamera: () => void
 } {
   const [devices, setDevices] = useState<VideoDeviceInfo[]>([])
   const [selectedDeviceId, setSelectedDeviceId] = useState('')
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState('')
+  const [cameraEnabled, setCameraEnabled] = useState(true)
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -36,6 +40,14 @@ export function useWebcam(settings: VirtualCameraSettings): {
   }, [refreshDevices])
 
   useEffect(() => {
+    if (!cameraEnabled) {
+      setStream((current) => {
+        current?.getTracks().forEach((track) => track.stop())
+        return null
+      })
+      return
+    }
+
     let cancelled = false
 
     async function start(): Promise<void> {
@@ -76,11 +88,14 @@ export function useWebcam(settings: VirtualCameraSettings): {
     return () => {
       cancelled = true
     }
-  }, [selectedDeviceId, settings.fps, settings.height, settings.width])
+  }, [selectedDeviceId, settings.fps, settings.height, settings.width, cameraEnabled])
 
   useEffect(() => {
     return () => stream?.getTracks().forEach((track) => track.stop())
   }, [stream])
 
-  return { devices, selectedDeviceId, stream, error, refreshDevices, setSelectedDeviceId }
+  const stopCamera = useCallback(() => setCameraEnabled(false), [])
+  const startCamera = useCallback(() => setCameraEnabled(true), [])
+
+  return { devices, selectedDeviceId, stream, error, cameraEnabled, refreshDevices, setSelectedDeviceId, stopCamera, startCamera }
 }

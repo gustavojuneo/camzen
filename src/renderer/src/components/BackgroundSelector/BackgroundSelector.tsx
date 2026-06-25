@@ -1,17 +1,52 @@
-import { ImagePlus, Trash2 } from 'lucide-react'
+import { ImagePlus, Trash2, VideoOff } from 'lucide-react'
 import type { BackgroundAsset } from '../../../../shared/types'
+import { NONE_BACKGROUND } from '../../../../shared/types'
 import { Button } from '@renderer/components/ui/button'
 import { Panel } from '@renderer/components/ui/panel'
 import { cn } from '@renderer/lib/cn'
 
-function createImportedBackground(file: File): BackgroundAsset {
+function createImportedBackground(file: File, persistedUrl: string): BackgroundAsset {
   const kind = file.type.startsWith('video/') ? 'video' : 'image'
   return {
     id: `custom-${crypto.randomUUID()}`,
     name: file.name.replace(/\.[^.]+$/, ''),
     kind,
-    value: URL.createObjectURL(file)
+    value: persistedUrl
   }
+}
+
+function BackgroundPreview({ background }: { background: BackgroundAsset }): React.JSX.Element {
+  if (background.kind === 'none') {
+    return (
+      <span className="absolute inset-0 grid place-items-center bg-neutral-950">
+        <VideoOff className="h-5 w-5 text-neutral-500" />
+      </span>
+    )
+  }
+  if (background.kind === 'solid') {
+    return <span className="absolute inset-0" style={{ background: background.value }} />
+  }
+  if (background.kind === 'blur') {
+    return (
+      <span className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,#67e8f9,transparent_32%),linear-gradient(135deg,#27272a,#111827)] blur-sm" />
+    )
+  }
+  if (background.kind === 'image') {
+    return <img src={background.value} className="absolute inset-0 h-full w-full object-cover" alt="" />
+  }
+  if (background.kind === 'video') {
+    return (
+      <video
+        src={background.value}
+        className="absolute inset-0 h-full w-full object-cover"
+        muted
+        autoPlay
+        loop
+        playsInline
+      />
+    )
+  }
+  return <></>
 }
 
 export function BackgroundSelector({
@@ -27,10 +62,12 @@ export function BackgroundSelector({
   onAdd: (asset: BackgroundAsset) => void
   onRemove: (id: string) => void
 }): React.JSX.Element {
+  const allItems = [NONE_BACKGROUND, ...backgrounds]
+
   return (
     <Panel className="p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-neutral-100">Fundos</h2>
+        <h2 className="text-sm font-semibold text-neutral-100">Filtros</h2>
         <Button className="relative overflow-hidden" size="sm" intent="ghost">
           <ImagePlus className="h-4 w-4" />
           Importar
@@ -40,7 +77,13 @@ export function BackgroundSelector({
             accept="image/*,video/mp4,video/webm"
             onChange={(event) => {
               const file = event.currentTarget.files?.[0]
-              if (file) onAdd(createImportedBackground(file))
+              if (file) {
+                // file.path is the real filesystem path (Electron-only)
+                const filePath = (file as File & { path: string }).path
+                void window.api.backgrounds.save(filePath).then((url) => {
+                  onAdd(createImportedBackground(file, url))
+                })
+              }
               event.currentTarget.value = ''
             }}
           />
@@ -48,7 +91,7 @@ export function BackgroundSelector({
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        {backgrounds.map((background) => (
+        {allItems.map((background) => (
           <button
             key={background.id}
             className={cn(
@@ -58,15 +101,7 @@ export function BackgroundSelector({
             onClick={() => onSelect(background.id)}
             type="button"
           >
-            {background.kind === 'solid' ? (
-              <span className="absolute inset-0" style={{ background: background.value }} />
-            ) : background.kind === 'blur' ? (
-              <span className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,#67e8f9,transparent_32%),linear-gradient(135deg,#27272a,#111827)] blur-sm" />
-            ) : (
-              <span className="absolute inset-0 grid place-items-center text-xs text-neutral-500">
-                {background.kind}
-              </span>
-            )}
+            <BackgroundPreview background={background} />
             <span className="absolute inset-x-0 bottom-0 bg-neutral-950/80 px-2 py-1 text-xs font-medium text-neutral-100">
               {background.name}
             </span>

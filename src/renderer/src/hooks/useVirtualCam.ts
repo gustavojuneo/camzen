@@ -6,7 +6,6 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
   state: VirtualCameraState
   start: (canvas: HTMLCanvasElement | null) => Promise<void>
   stop: () => Promise<void>
-  loadModule: () => Promise<void>
 } {
   const [state, setState] = useState<VirtualCameraState>({
     active: false,
@@ -36,6 +35,15 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
     async (canvas: HTMLCanvasElement | null) => {
       if (!canvas) return
       stopFrameLoop()
+
+      // Ensure v4l2 module is loaded before starting
+      const v4l2State = await window.api.v4l2.status()
+      if (!v4l2State.active) {
+        const loadState = await window.api.v4l2.load(settings)
+        setState(loadState)
+        if (!loadState.active) return
+      }
+
       setState(await window.api.virtualCamera.start(settings))
 
       intervalRef.current = window.setInterval(() => {
@@ -50,10 +58,6 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
     [settings, stopFrameLoop]
   )
 
-  const loadModule = useCallback(async () => {
-    setState(await window.api.v4l2.load(settings))
-  }, [settings])
-
   useEffect(() => {
     void window.api.v4l2.status().then(setState)
     return () => {
@@ -61,5 +65,5 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
     }
   }, [stopFrameLoop])
 
-  return { state, start, stop, loadModule }
+  return { state, start, stop }
 }

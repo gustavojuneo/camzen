@@ -1,5 +1,7 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, ipcMain, protocol, net } from 'electron'
+import { join, extname } from 'path'
+import { mkdir, copyFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import type { UserPreferences, VirtualCameraSettings } from '../shared/types'
@@ -11,6 +13,10 @@ import { getVirtualCameraStatus, loadV4l2Loopback } from './modules/v4l2Manager'
 process.env.ELECTRON_OZONE_PLATFORM_HINT = process.env.ELECTRON_OZONE_PLATFORM_HINT || 'wayland'
 app.commandLine.appendSwitch('ozone-platform', 'wayland')
 app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app-bg', privileges: { secure: true, standard: true, supportFetchAPI: true } }
+])
 
 const ffmpegPipe = new FfmpegPipe()
 
@@ -60,6 +66,21 @@ app.whenReady().then(() => {
   // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+  })
+
+  const bgDir = join(app.getPath('userData'), 'backgrounds')
+
+  // Serve persisted background files via app-bg://
+  protocol.handle('app-bg', (request) => {
+    const filename = decodeURIComponent(new URL(request.url).pathname.replace(/^\//, ''))
+    return net.fetch(`file://${join(bgDir, filename)}`)
+  })
+
+  ipcMain.handle('backgrounds:save', async (_event, sourcePath: string) => {
+    await mkdir(bgDir, { recursive: true })
+    const filename = `${randomUUID()}${extname(sourcePath)}`
+    await copyFile(sourcePath, join(bgDir, filename))
+    return `app-bg://${filename}`
   })
 
   ipcMain.handle('dependencies:check', () => checkSystemDependencies())
