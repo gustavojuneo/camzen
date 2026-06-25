@@ -13,113 +13,377 @@ export interface ComposeInput {
   settings: VirtualCameraSettings
 }
 
-function drawCover(
-  context: CanvasRenderingContext2D,
-  image: CanvasImageSource,
-  width: number,
-  height: number
-): void {
-  const rawSourceWidth =
-    'videoWidth' in image
-      ? image.videoWidth
-      : 'displayWidth' in image
-        ? image.displayWidth
-        : image.width
-  const rawSourceHeight =
-    'videoHeight' in image
-      ? image.videoHeight
-      : 'displayHeight' in image
-        ? image.displayHeight
-        : image.height
-  const sourceWidth = Number(rawSourceWidth)
-  const sourceHeight = Number(rawSourceHeight)
-  if (!sourceWidth || !sourceHeight) return
-
-  const scale = Math.max(width / sourceWidth, height / sourceHeight)
-  const scaledWidth = sourceWidth * scale
-  const scaledHeight = sourceHeight * scale
-  const x = (width - scaledWidth) / 2
-  const y = (height - scaledHeight) / 2
-
-  context.drawImage(image, x, y, scaledWidth, scaledHeight)
+// ---------------------------------------------------------------------------
+// WebGL state — criado uma vez e reutilizado em todos os frames
+// ---------------------------------------------------------------------------
+interface GlState {
+  gl: WebGLRenderingContext
+  program: WebGLProgram
+  positionBuffer: WebGLBuffer
+  texCoordBuffer: WebGLBuffer
+  videoTexture: WebGLTexture
+  bgTexture: WebGLTexture
+  maskTexture: WebGLTexture
+  locations: {
+    position: number
+    texCoord: number
+    uVideo: WebGLUniformLocation
+    uBackground: WebGLUniformLocation
+    uMask: WebGLUniformLocation
+    uFeathering: WebGLUniformLocation
+    uBgColor: WebGLUniformLocation
+    uBgKind: WebGLUniformLocation
+  }
 }
 
-function drawBackground(
-  context: CanvasRenderingContext2D,
-  input: ComposeInput,
-  width: number,
-  height: number
-): void {
-  if (input.background.kind === 'solid') {
-    context.fillStyle = input.background.value
-    context.fillRect(0, 0, width, height)
-    return
+const glCache = new WeakMap<HTMLCanvasElement, GlState>()
+
+const VERT = /* glsl */ `
+  attribute vec2 a_position;
+  attribute vec2 a_texCoord;
+  varying vec2 v_texCoord;
+  void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+    v_texCoord = a_texCoord;
+  }
+`
+
+const FRAG = /* glsl */ `
+  precision mediump float;
+  varying vec2 v_texCoord;
+
+  uniform sampler2D u_video;
+  uniform sampler2D u_background;
+  uniform sampler2D u_mask;
+  uniform float u_feathering;
+  uniform vec3 u_bgColor;
+  uniform int u_bgKind; // 0=solid 1=image/video 2=blur(handled on CPU)
+
+  float smoothAlpha(float value, float feathering) {
+    float softness = max(0.02, feathering / 100.0);
+    float low  = 0.5 - softness;
+    float high = 0.5 + softness;
+    float t = clamp((value - low) / (high - low), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
   }
 
-  if (input.background.kind === 'blur') {
-    context.save()
-    context.filter = `blur(${input.background.value || 18}px)`
-    drawCover(context, input.video, width, height)
-    context.restore()
-    return
-  }
+  void main() {
+    vec2 uv = v_texCoord;
+    vec4 person = texture2D(u_video, uv);
+    float confidence = texture2D(u_mask, uv).r;
+    float alpha = smoothAlpha(confidence, u_feathering);
 
-  if (input.backgroundElement) {
-    drawCover(context, input.backgroundElement, width, height)
-    return
-  }
+    vec4 bg;
+    if (u_bgKind == 0) {
+      bg = vec4(u_bgColor, 1.0);
+    } else {
+      bg = texture2D(u_background, uv);
+    }
 
-  context.fillStyle = '#111827'
-  context.fillRect(0, 0, width, height)
+    gl_FragColor = mix(bg, person, alpha);
+  }
+`
+
+function compileShader(gl: WebGLRenderingContext, type: number, src: string): WebGLShader {
+  const shader = gl.createShader(type)!
+  gl.shaderSource(shader, src)
+  gl.compileShader(shader)
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    throw new Error('Shader compile error: ' + gl.getShaderInfoLog(shader))
+  }
+  return shader
 }
 
-function smoothAlpha(value: number, feathering: number): number {
-  const softness = Math.max(0.02, feathering / 100)
-  const low = 0.5 - softness
-  const high = 0.5 + softness
-  const normalized = Math.min(1, Math.max(0, (value - low) / (high - low)))
-
-  return normalized * normalized * (3 - 2 * normalized)
+function createProgram(gl: WebGLRenderingContext): WebGLProgram {
+  const program = gl.createProgram()!
+  gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, VERT))
+  gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, FRAG))
+  gl.linkProgram(program)
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error('Program link error: ' + gl.getProgramInfoLog(program))
+  }
+  return program
 }
 
+function createTexture(gl: WebGLRenderingContext): WebGLTexture {
+  const tex = gl.createTexture()!
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+  return tex
+}
+
+function makeBuffer(gl: WebGLRenderingContext, data: Float32Array): WebGLBuffer {
+  const buf = gl.createBuffer()!
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+  gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW)
+  return buf
+}
+
+function getOrCreateGlState(canvas: HTMLCanvasElement): GlState | null {
+  if (glCache.has(canvas)) return glCache.get(canvas)!
+
+  const gl = canvas.getContext('webgl', { alpha: false, antialias: false })
+  if (!gl) return null
+
+  const program = createProgram(gl)
+
+  // Full-screen quad
+  const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1])
+  const texCoords = new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]) // flip Y
+
+  const state: GlState = {
+    gl,
+    program,
+    positionBuffer: makeBuffer(gl, positions),
+    texCoordBuffer: makeBuffer(gl, texCoords),
+    videoTexture: createTexture(gl),
+    bgTexture: createTexture(gl),
+    maskTexture: createTexture(gl),
+    locations: {
+      position: gl.getAttribLocation(program, 'a_position'),
+      texCoord: gl.getAttribLocation(program, 'a_texCoord'),
+      uVideo: gl.getUniformLocation(program, 'u_video')!,
+      uBackground: gl.getUniformLocation(program, 'u_background')!,
+      uMask: gl.getUniformLocation(program, 'u_mask')!,
+      uFeathering: gl.getUniformLocation(program, 'u_feathering')!,
+      uBgColor: gl.getUniformLocation(program, 'u_bgColor')!,
+      uBgKind: gl.getUniformLocation(program, 'u_bgKind')!
+    }
+  }
+
+  glCache.set(canvas, state)
+  return state
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Converte hex '#rrggbb' para [r, g, b] em 0–1 */
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace('#', ''), 16)
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]
+}
+
+/** Desenha background de blur no canvas 2D auxiliar e retorna ele como fonte */
+const blurCache = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D>()
+
+function getBlurCtx(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  if (!blurCache.has(canvas)) {
+    blurCache.set(canvas, canvas.getContext('2d')!)
+  }
+  return blurCache.get(canvas)!
+}
+
+// Canvas auxiliar para blur (reutilizado)
+let blurCanvas: HTMLCanvasElement | null = null
+
+function renderBlurBg(video: HTMLVideoElement, blurAmount: number, width: number, height: number): HTMLCanvasElement {
+  if (!blurCanvas) {
+    blurCanvas = document.createElement('canvas')
+  }
+  blurCanvas.width = width
+  blurCanvas.height = height
+  const ctx = getBlurCtx(blurCanvas)
+  ctx.filter = `blur(${blurAmount}px)`
+  ctx.drawImage(video, 0, 0, width, height)
+  ctx.filter = 'none'
+  return blurCanvas
+}
+
+// ---------------------------------------------------------------------------
+// Máscara suavizada — reutiliza Float32Array entre frames
+// ---------------------------------------------------------------------------
+let smoothedMaskBuffer: Float32Array | null = null
+
+function getSmoothedMask(
+  raw: Float32Array | Uint8Array,
+  size: number,
+  isFloat: boolean
+): Float32Array {
+  if (!smoothedMaskBuffer || smoothedMaskBuffer.length !== size) {
+    smoothedMaskBuffer = new Float32Array(size)
+  }
+  if (isFloat) {
+    smoothedMaskBuffer.set(raw as Float32Array)
+  } else {
+    for (let i = 0; i < size; i++) {
+      smoothedMaskBuffer[i] = (raw as Uint8Array)[i] / 255
+    }
+  }
+  return smoothedMaskBuffer
+}
+
+// Uint8Array reutilizável para upload da máscara na textura
+let maskUploadBuffer: Uint8Array | null = null
+
+// ---------------------------------------------------------------------------
+// composeFrame principal
+// ---------------------------------------------------------------------------
 export function composeFrame(input: ComposeInput): void {
+  const { width, height, feathering } = input.settings
+
+  // Redimensiona canvas de saída apenas se necessário
+  if (input.outputCanvas.width !== width) input.outputCanvas.width = width
+  if (input.outputCanvas.height !== height) input.outputCanvas.height = height
+
+  // Sem máscara: fallback simples 2D
+  if (!input.mask || !input.maskWidth || !input.maskHeight) {
+    const ctx = input.outputCanvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(input.video, 0, 0, width, height)
+    return
+  }
+
+  const state = getOrCreateGlState(input.outputCanvas)
+
+  // Se WebGL não disponível, cai no path 2D legado
+  if (!state) {
+    composeFrame2D(input)
+    return
+  }
+
+  const { gl, program, locations } = state
+
+  gl.viewport(0, 0, width, height)
+  gl.useProgram(program)
+
+  // --- Textura do vídeo (pessoa) ---
+  gl.activeTexture(gl.TEXTURE0)
+  gl.bindTexture(gl.TEXTURE_2D, state.videoTexture)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, input.video)
+  gl.uniform1i(locations.uVideo, 0)
+
+  // --- Textura de background ---
+  gl.activeTexture(gl.TEXTURE1)
+  gl.bindTexture(gl.TEXTURE_2D, state.bgTexture)
+
+  let bgKind = 0 // solid
+
+  if (input.background.kind === 'solid') {
+    const [r, g, b] = hexToRgb(input.background.value as string)
+    gl.uniform3f(locations.uBgColor, r, g, b)
+    gl.uniform1i(locations.uBgKind, 0)
+    // Textura dummy para evitar sampler inválido
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]))
+  } else if (input.background.kind === 'blur') {
+    const blurBg = renderBlurBg(input.video, Number(input.background.value) || 18, width, height)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, blurBg)
+    bgKind = 1
+    gl.uniform1i(locations.uBgKind, 1)
+  } else if (input.backgroundElement) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, input.backgroundElement)
+    bgKind = 1
+    gl.uniform1i(locations.uBgKind, 1)
+  } else {
+    gl.uniform3f(locations.uBgColor, 0.067, 0.094, 0.153) // #111827
+    gl.uniform1i(locations.uBgKind, 0)
+  }
+
+  gl.uniform1i(locations.uBackground, 1)
+
+  // --- Textura da máscara ---
+  const maskSize = input.maskWidth * input.maskHeight
+  const isFloat = input.mask instanceof Float32Array
+  const floatMask = getSmoothedMask(input.mask, maskSize, isFloat)
+
+  // Converte para Uint8 para upload (LUMINANCE texture)
+  if (!maskUploadBuffer || maskUploadBuffer.length !== maskSize) {
+    maskUploadBuffer = new Uint8Array(maskSize)
+  }
+  for (let i = 0; i < maskSize; i++) {
+    maskUploadBuffer[i] = Math.round(floatMask[i] * 255)
+  }
+
+  gl.activeTexture(gl.TEXTURE2)
+  gl.bindTexture(gl.TEXTURE_2D, state.maskTexture)
+  gl.texImage2D(
+    gl.TEXTURE_2D, 0, gl.LUMINANCE,
+    input.maskWidth, input.maskHeight, 0,
+    gl.LUMINANCE, gl.UNSIGNED_BYTE,
+    maskUploadBuffer
+  )
+  gl.uniform1i(locations.uMask, 2)
+
+  // --- Feathering ---
+  gl.uniform1f(locations.uFeathering, feathering)
+
+  // --- Quad ---
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.positionBuffer)
+  gl.enableVertexAttribArray(locations.position)
+  gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0)
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.texCoordBuffer)
+  gl.enableVertexAttribArray(locations.texCoord)
+  gl.vertexAttribPointer(locations.texCoord, 2, gl.FLOAT, false, 0, 0)
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+}
+
+// ---------------------------------------------------------------------------
+// Fallback 2D (caso WebGL indisponível)
+// ---------------------------------------------------------------------------
+function composeFrame2D(input: ComposeInput): void {
   const { width, height } = input.settings
-  const sourceContext = input.sourceCanvas.getContext('2d', { willReadFrequently: true })
-  const personContext = input.personCanvas.getContext('2d', { willReadFrequently: true })
-  const outputContext = input.outputCanvas.getContext('2d')
-  if (!sourceContext || !personContext || !outputContext) return
+  const sourceCtx = input.sourceCanvas.getContext('2d', { willReadFrequently: true })
+  const personCtx = input.personCanvas.getContext('2d', { willReadFrequently: true })
+  const outputCtx = input.outputCanvas.getContext('2d')
+  if (!sourceCtx || !personCtx || !outputCtx) return
 
   input.sourceCanvas.width = width
   input.sourceCanvas.height = height
   input.personCanvas.width = width
   input.personCanvas.height = height
-  input.outputCanvas.width = width
-  input.outputCanvas.height = height
 
-  sourceContext.drawImage(input.video, 0, 0, width, height)
-  drawBackground(outputContext, input, width, height)
+  sourceCtx.drawImage(input.video, 0, 0, width, height)
+
+  // background
+  if (input.background.kind === 'solid') {
+    outputCtx.fillStyle = input.background.value as string
+    outputCtx.fillRect(0, 0, width, height)
+  } else if (input.background.kind === 'blur') {
+    outputCtx.save()
+    outputCtx.filter = `blur(${input.background.value || 18}px)`
+    outputCtx.drawImage(input.video, 0, 0, width, height)
+    outputCtx.restore()
+  } else if (input.backgroundElement) {
+    outputCtx.drawImage(input.backgroundElement, 0, 0, width, height)
+  } else {
+    outputCtx.fillStyle = '#111827'
+    outputCtx.fillRect(0, 0, width, height)
+  }
 
   if (!input.mask || !input.maskWidth || !input.maskHeight) {
-    outputContext.drawImage(input.video, 0, 0, width, height)
+    outputCtx.drawImage(input.video, 0, 0, width, height)
     return
   }
 
-  const frame = sourceContext.getImageData(0, 0, width, height)
+  const frame = sourceCtx.getImageData(0, 0, width, height)
   const pixels = frame.data
   const xScale = input.maskWidth / width
   const yScale = input.maskHeight / height
+  const feathering = input.settings.feathering
 
-  for (let y = 0; y < height; y += 1) {
-    const maskY = Math.min(input.maskHeight - 1, Math.floor(y * yScale))
-    for (let x = 0; x < width; x += 1) {
-      const maskX = Math.min(input.maskWidth - 1, Math.floor(x * xScale))
+  for (let py = 0; py < height; py++) {
+    const maskY = Math.min(input.maskHeight - 1, Math.floor(py * yScale))
+    for (let px = 0; px < width; px++) {
+      const maskX = Math.min(input.maskWidth - 1, Math.floor(px * xScale))
       const maskIndex = maskY * input.maskWidth + maskX
-      const pixelIndex = (y * width + x) * 4
-      const confidence = input.mask instanceof Float32Array ? input.mask[maskIndex] : input.mask[maskIndex] / 255
-      pixels[pixelIndex + 3] = Math.round(255 * smoothAlpha(confidence, input.settings.feathering))
+      const pixelIndex = (py * width + px) * 4
+      const confidence = input.mask instanceof Float32Array
+        ? input.mask[maskIndex]
+        : input.mask[maskIndex] / 255
+      const softness = Math.max(0.02, feathering / 100)
+      const low = 0.5 - softness
+      const high = 0.5 + softness
+      const t = Math.min(1, Math.max(0, (confidence - low) / (high - low)))
+      pixels[pixelIndex + 3] = Math.round(255 * t * t * (3 - 2 * t))
     }
   }
 
-  personContext.putImageData(frame, 0, 0)
-  outputContext.drawImage(input.personCanvas, 0, 0)
+  personCtx.putImageData(frame, 0, 0)
+  outputCtx.drawImage(input.personCanvas, 0, 0)
 }

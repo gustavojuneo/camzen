@@ -6,7 +6,7 @@ import { composeFrame } from '@renderer/lib/pipeline'
 
 const WASM_PATH = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'
 const MODEL_PATH =
-  'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite'
+  'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite'
 
 type Delegate = 'GPU' | 'CPU'
 
@@ -19,8 +19,8 @@ async function createSegmenter(delegate: Delegate): Promise<ImageSegmenter> {
       delegate
     },
     runningMode: 'VIDEO',
-    outputConfidenceMasks: true,
-    outputCategoryMask: false
+    outputConfidenceMasks: false,
+    outputCategoryMask: true
   })
 }
 
@@ -48,6 +48,9 @@ export function useSegmentation({
   const segmenterRef = useRef<ImageSegmenter | null>(null)
   const frameCountRef = useRef(0)
   const lastFpsAtRef = useRef(performance.now())
+
+  // Reutilizamos o mesmo buffer entre frames para evitar alocação
+  const maskBufferRef = useRef<Uint8Array | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -122,7 +125,27 @@ export function useSegmentation({
 
         if (segmenter) {
           const result: ImageSegmenterResult = segmenter.segmentForVideo(video, performance.now())
-          const mask = result.confidenceMasks?.[0]
+
+          // categoryMask: 0 = fundo, 1–5 = partes da pessoa
+          // Convertemos para Uint8Array: 0 = fundo, 255 = pessoa
+          const categoryMask = result.categoryMask
+          const categoryData = categoryMask?.getAsUint8Array()
+          const maskWidth = categoryMask?.width
+          const maskHeight = categoryMask?.height
+
+          let personMask: Uint8Array | undefined
+          if (categoryData && maskWidth && maskHeight) {
+            const size = maskWidth * maskHeight
+            if (!maskBufferRef.current || maskBufferRef.current.length !== size) {
+              maskBufferRef.current = new Uint8Array(size)
+            }
+            const buf = maskBufferRef.current
+            for (let i = 0; i < size; i++) {
+              buf[i] = categoryData[i] > 0 ? 255 : 0
+            }
+            personMask = buf
+          }
+
           composeFrame({
             sourceCanvas,
             personCanvas,
@@ -130,12 +153,13 @@ export function useSegmentation({
             video,
             background,
             backgroundElement,
-            mask: mask?.getAsFloat32Array(),
-            maskWidth: mask?.width,
-            maskHeight: mask?.height,
+            mask: personMask,
+            maskWidth,
+            maskHeight,
             settings
           })
-          mask?.close()
+
+          categoryMask?.close()
         } else {
           composeFrame({ sourceCanvas, personCanvas, outputCanvas, video, background, backgroundElement, settings })
         }
