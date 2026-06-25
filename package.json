@@ -1,9 +1,9 @@
 {
   "name": "camzen",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Virtual camera app for Linux Wayland with background replacement",
   "main": "./out/main/index.js",
-  "author": "example.com",
+  "author": "Gustavo Juneo <contato@gustavojuneo.dev>",
   "homepage": "https://electron-vite.org",
   "scripts": {
     "format": "prettier --write .",

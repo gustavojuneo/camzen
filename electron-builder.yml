@@ -1,5 +1,5 @@
-appId: com.gustavo.virtualcam
-productName: Virtual Camera
+appId: com.gustavo.camzen
+productName: Camzen
 directories:
   buildResources: build
 files:
@@ -31,11 +31,12 @@ dmg:
 linux:
   target:
     - AppImage
-  maintainer: electronjs.org
+  maintainer: Gustavo Juneo <contato@gustavojuneo.dev>
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: gustavojuneo
+  repo: camzen

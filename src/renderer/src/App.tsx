@@ -51,7 +51,7 @@ function App(): React.JSX.Element {
     <div className="grid h-screen grid-rows-[auto_1fr_auto] bg-neutral-950 text-neutral-100">
       <header className="flex h-16 items-center justify-between border-b border-neutral-800 px-5">
         <div>
-          <h1 className="text-base font-semibold">Virtual Camera</h1>
+          <h1 className="text-base font-semibold">Camzen</h1>
           <p className="text-xs text-neutral-500">Linux Wayland + KDE, MediaPipe e v4l2loopback</p>
         </div>
         <div className="flex items-center gap-2">
