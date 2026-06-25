@@ -1,6 +1,6 @@
 {
-  "name": "video-electron",
-  "version": "1.0.0",
+  "name": "camzen",
+  "version": "0.1.0",
   "description": "Virtual camera app for Linux Wayland with background replacement",
   "main": "./out/main/index.js",
   "author": "example.com",

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Electron + React + TypeScript app for Linux X11/Wayland virtual camera workflows.
+Camzen — Electron + React + TypeScript app for Linux X11/Wayland virtual camera workflows.
 
 - `src/main/`: Electron main process, preferences, FFmpeg, `v4l2loopback`, and device handling.
 - `src/preload/`: preload bridge and renderer API declarations.
@@ -54,3 +54,14 @@ Pull requests should include a concise summary, validation commands, linked issu
 ## Security & Configuration Tips
 
 Do not commit imported user media, generated packages, or local machine paths. Be careful with `pkexec`, `modprobe`, FFmpeg, and virtual camera devices; keep privileged operations in the main process and expose typed, minimal APIs through preload.
+
+## CI/CD
+
+GitHub Actions workflow at `.github/workflows/release.yml` builds and publishes an AppImage to GitHub Releases on every `v*` tag push.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow runs on `ubuntu-latest`, installs dependencies with `npm ci`, and uploads `dist/*.AppImage` to the release using `GITHUB_TOKEN`.
