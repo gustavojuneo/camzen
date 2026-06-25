@@ -3,9 +3,8 @@ import { FilesetResolver, ImageSegmenter, type ImageSegmenterResult } from '@med
 import type { BackgroundAsset, VirtualCameraSettings } from '../../../shared/types'
 import { composeFrame } from '@renderer/lib/pipeline'
 
-const WASM_PATH = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'
-const MODEL_PATH =
-  'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite'
+const WASM_PATH = '/mediapipe/wasm'
+const MODEL_PATH = '/mediapipe/selfie_multiclass_256x256.tflite'
 
 async function createSegmenter(delegate: 'GPU' | 'CPU'): Promise<ImageSegmenter> {
   const vision = await FilesetResolver.forVisionTasks(WASM_PATH)
