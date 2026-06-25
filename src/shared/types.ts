@@ -17,6 +17,8 @@ export interface BackgroundAsset {
   kind: BackgroundKind
   value: string
   builtIn?: boolean
+  /** URL persistente (app-bg://) usada para salvar no store; value pode ser uma blob URL em runtime */
+  persistedUrl?: string
 }
 
 export interface VideoDeviceInfo {
@@ -59,7 +61,8 @@ export interface AppApi {
     check: () => Promise<DependencyStatus[]>
   }
   backgrounds: {
-    save: (sourcePath: string) => Promise<string>
+    save: (fileBuffer: ArrayBuffer, fileName: string) => Promise<string>
+    read: (filename: string) => Promise<{ data: Uint8Array; mime: string }>
   }
   v4l2: {
     status: () => Promise<VirtualCameraState>

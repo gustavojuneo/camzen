@@ -5,13 +5,14 @@ import { Button } from '@renderer/components/ui/button'
 import { Panel } from '@renderer/components/ui/panel'
 import { cn } from '@renderer/lib/cn'
 
-function createImportedBackground(file: File, persistedUrl: string): BackgroundAsset {
+function createImportedBackground(file: File, blobUrl: string, persistedUrl: string): BackgroundAsset {
   const kind = file.type.startsWith('video/') ? 'video' : 'image'
   return {
     id: `custom-${crypto.randomUUID()}`,
     name: file.name.replace(/\.[^.]+$/, ''),
     kind,
-    value: persistedUrl
+    value: blobUrl,
+    persistedUrl
   }
 }
 
@@ -75,16 +76,20 @@ export function BackgroundSelector({
             className="absolute inset-0 cursor-pointer opacity-0"
             type="file"
             accept="image/*,video/mp4,video/webm"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0]
+            onChange={async (event) => {
+              const input = event.currentTarget
+              const file = input.files?.[0]
               if (file) {
-                // file.path is the real filesystem path (Electron-only)
-                const filePath = (file as File & { path: string }).path
-                void window.api.backgrounds.save(filePath).then((url) => {
-                  onAdd(createImportedBackground(file, url))
-                })
+                const blobUrl = URL.createObjectURL(file)
+                try {
+                  const persistedUrl = await window.api.backgrounds.save(await file.arrayBuffer(), file.name)
+                  onAdd(createImportedBackground(file, blobUrl, persistedUrl))
+                } catch (err) {
+                  console.warn('Failed to persist background', err)
+                  onAdd(createImportedBackground(file, blobUrl, blobUrl))
+                }
               }
-              event.currentTarget.value = ''
+              input.value = ''
             }}
           />
         </Button>

@@ -17,12 +17,34 @@ export function useBackgrounds(): {
   const [preferences, setPreferencesState] = useState<UserPreferences>(DEFAULT_PREFERENCES)
 
   useEffect(() => {
-    void window.api.store.getPreferences().then(setPreferencesState)
+    window.api.store.getPreferences().then(async (prefs) => {
+      const resolved = await Promise.all(
+        prefs.backgrounds.map(async (bg) => {
+          if (!bg.value.startsWith('app-bg://')) return bg
+          const filename = bg.value.replace('app-bg:///', '')
+          try {
+            const { data, mime } = await window.api.backgrounds.read(filename)
+            const blobUrl = URL.createObjectURL(new Blob([data], { type: mime }))
+            return { ...bg, value: blobUrl, persistedUrl: bg.value }
+          } catch {
+            return bg
+          }
+        })
+      )
+      setPreferencesState({ ...prefs, backgrounds: resolved })
+    })
   }, [])
 
   const persist = useCallback((nextPreferences: UserPreferences) => {
     setPreferencesState(nextPreferences)
-    void window.api.store.setPreferences(nextPreferences)
+    // Save to store using persistedUrl when available (blob URLs don't survive restarts)
+    const forStore: UserPreferences = {
+      ...nextPreferences,
+      backgrounds: nextPreferences.backgrounds.map((bg) =>
+        bg.persistedUrl ? { ...bg, value: bg.persistedUrl } : bg
+      )
+    }
+    void window.api.store.setPreferences(forStore)
   }, [])
 
   const selectedBackground = useMemo(

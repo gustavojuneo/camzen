@@ -1,6 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain, protocol, net } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol } from 'electron'
 import { join, extname } from 'path'
-import { mkdir, copyFile } from 'fs/promises'
+import { mkdir, writeFile, readFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -15,7 +15,7 @@ app.commandLine.appendSwitch('ozone-platform', 'wayland')
 app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'app-bg', privileges: { secure: true, standard: true, supportFetchAPI: true } }
+  { scheme: 'app-bg', privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: true } }
 ])
 
 const ffmpegPipe = new FfmpegPipe()
@@ -32,7 +32,8 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      webSecurity: !is.dev
     }
   })
 
@@ -71,16 +72,49 @@ app.whenReady().then(() => {
   const bgDir = join(app.getPath('userData'), 'backgrounds')
 
   // Serve persisted background files via app-bg://
-  protocol.handle('app-bg', (request) => {
-    const filename = decodeURIComponent(new URL(request.url).pathname.replace(/^\//, ''))
-    return net.fetch(`file://${join(bgDir, filename)}`)
+  const MIME_TYPES: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime'
+  }
+
+  protocol.handle('app-bg', async (request) => {
+    try {
+      const filename = decodeURIComponent(new URL(request.url).pathname.replace(/^\//, ''))
+      const filePath = join(bgDir, filename)
+      const data = await readFile(filePath)
+      const ext = extname(filename).toLowerCase()
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream'
+      return new Response(data, {
+        headers: {
+          'Content-Type': contentType,
+          'Access-Control-Allow-Origin': '*'
+        }
+      })
+    } catch {
+      return new Response('Not Found', { status: 404 })
+    }
   })
 
-  ipcMain.handle('backgrounds:save', async (_event, sourcePath: string) => {
+  ipcMain.handle('backgrounds:save', async (_event, fileBuffer: ArrayBuffer, fileName: string) => {
     await mkdir(bgDir, { recursive: true })
-    const filename = `${randomUUID()}${extname(sourcePath)}`
-    await copyFile(sourcePath, join(bgDir, filename))
-    return `app-bg://${filename}`
+    const filename = `${randomUUID()}${extname(fileName)}`
+    await writeFile(join(bgDir, filename), Buffer.from(fileBuffer))
+    return `app-bg:///${filename}`
+  })
+
+  ipcMain.handle('backgrounds:read', async (_event, filename: string) => {
+    const filePath = join(bgDir, filename)
+    const data = await readFile(filePath)
+    const ext = extname(filename).toLowerCase()
+    const mime = MIME_TYPES[ext] || 'application/octet-stream'
+    return { data: new Uint8Array(data), mime }
   })
 
   ipcMain.handle('dependencies:check', () => checkSystemDependencies())

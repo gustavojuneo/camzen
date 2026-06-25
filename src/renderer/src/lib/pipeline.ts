@@ -24,6 +24,7 @@ interface GlState {
   videoTexture: WebGLTexture
   bgTexture: WebGLTexture
   maskTexture: WebGLTexture
+  lastBgElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | null
   locations: {
     position: number
     texCoord: number
@@ -146,6 +147,8 @@ function getOrCreateGlState(outputCanvas: HTMLCanvasElement, width: number, heig
   const gl = hidden.getContext('webgl', { alpha: false, antialias: false })
   if (!gl) return null
 
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
+
   const program = createProgram(gl)
 
   // Full-screen quad
@@ -160,6 +163,7 @@ function getOrCreateGlState(outputCanvas: HTMLCanvasElement, width: number, heig
     videoTexture: createTexture(gl),
     bgTexture: createTexture(gl),
     maskTexture: createTexture(gl),
+    lastBgElement: null,
     locations: {
       position: gl.getAttribLocation(program, 'a_position'),
       texCoord: gl.getAttribLocation(program, 'a_texCoord'),
@@ -266,7 +270,12 @@ export function composeFrame(input: ComposeInput): void {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, blurBg)
     gl.uniform1i(locations.uBgKind, 1)
   } else if (input.backgroundElement) {
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, input.backgroundElement)
+    // For video backgrounds, upload every frame. For images, upload only once.
+    const isVideo = input.backgroundElement instanceof HTMLVideoElement
+    if (isVideo || state.lastBgElement !== input.backgroundElement) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, input.backgroundElement)
+      state.lastBgElement = input.backgroundElement
+    }
     gl.uniform1i(locations.uBgKind, 1)
   } else {
     gl.uniform3f(locations.uBgColor, 0.067, 0.094, 0.153) // #111827

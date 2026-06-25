@@ -8,7 +8,8 @@ const api: AppApi = {
     check: () => ipcRenderer.invoke('dependencies:check')
   },
   backgrounds: {
-    save: (sourcePath: string) => ipcRenderer.invoke('backgrounds:save', sourcePath)
+    save: (fileBuffer: ArrayBuffer, fileName: string) => ipcRenderer.invoke('backgrounds:save', fileBuffer, fileName),
+    read: (filename: string) => ipcRenderer.invoke('backgrounds:read', filename)
   },
   v4l2: {
     status: () => ipcRenderer.invoke('v4l2:status'),
