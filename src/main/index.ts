@@ -162,5 +162,12 @@ app.on('window-all-closed', () => {
   }
 })
 
+app.on('before-quit', (event) => {
+  if (ffmpegPipe.isRunning()) {
+    event.preventDefault()
+    ffmpegPipe.stop().then(() => app.quit())
+  }
+})
+
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.

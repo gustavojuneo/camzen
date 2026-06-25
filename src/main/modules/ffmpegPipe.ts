@@ -7,8 +7,8 @@ export class FfmpegPipe {
   private lastError = ''
   private framesWritten = 0
 
-  start(settings: VirtualCameraSettings): VirtualCameraState {
-    this.stop()
+  async start(settings: VirtualCameraSettings): Promise<VirtualCameraState> {
+    await this.stop()
     this.settings = settings
     this.lastError = ''
     this.framesWritten = 0
@@ -74,6 +74,10 @@ export class FfmpegPipe {
     return accepted
   }
 
+  isRunning(): boolean {
+    return this.process !== null
+  }
+
   status(): VirtualCameraState {
     return {
       active: Boolean(this.process),
@@ -86,19 +90,27 @@ export class FfmpegPipe {
     }
   }
 
-  stop(): VirtualCameraState {
-    if (this.process) {
-      this.process.stdin.end()
-      this.process.kill('SIGTERM')
-      this.process = null
-    }
-
-    return {
+  stop(): Promise<VirtualCameraState> {
+    const result: VirtualCameraState = {
       active: false,
       devicePath: this.settings?.devicePath ?? null,
       message: this.lastError || 'Camera virtual inativa',
       framesWritten: this.framesWritten,
       lastError: this.lastError || undefined
     }
+
+    if (!this.process) return Promise.resolve(result)
+
+    return new Promise((resolve) => {
+      const proc = this.process!
+      this.process = null
+      proc.once('close', () => resolve(result))
+      proc.stdin.end()
+      proc.kill('SIGTERM')
+      // Force kill if it doesn't exit within 2s
+      setTimeout(() => {
+        if (!proc.killed) proc.kill('SIGKILL')
+      }, 2000)
+    })
   }
 }

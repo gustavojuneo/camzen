@@ -25,33 +25,20 @@ export async function getVirtualCameraStatus(devicePath = '/dev/video10'): Promi
 }
 
 export async function loadV4l2Loopback(settings: VirtualCameraSettings): Promise<VirtualCameraState> {
-  // If the module is already loaded and the device exists, skip modprobe to
-  // avoid "Conversion failed!" errors on X11 after restarting the app.
-  const current = await getVirtualCameraStatus(settings.devicePath)
-  if (current.active) return current
+  const videoNumber = settings.devicePath.replace('/dev/video', '') || '10'
 
-  return new Promise((resolve) => {
-    const videoNumber = settings.devicePath.replace('/dev/video', '') || '10'
-    const args = [
-      'modprobe',
-      'v4l2loopback',
-      'devices=1',
-      `video_nr=${videoNumber}`,
-      'card_label=VirtualCam',
-      'exclusive_caps=1'
-    ]
-    const child = spawn('pkexec', args, { stdio: 'ignore' })
+  // Always do rmmod + modprobe in a single pkexec call to guarantee a clean
+  // device state. exclusive_caps=1 is intentionally omitted — it causes
+  // VIDIOC_G_FMT errors with FFmpeg 6+ when no consumer is attached.
+  const script = `modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback devices=1 video_nr=${videoNumber} card_label=VirtualCam`
 
-    child.on('close', async () => {
-      resolve(await getVirtualCameraStatus(settings.devicePath))
-    })
-
-    child.on('error', async () => {
-      resolve({
-        active: false,
-        devicePath: null,
-        message: 'Nao foi possivel abrir pkexec para carregar o modulo'
-      })
-    })
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('pkexec', ['bash', '-c', script], { stdio: 'ignore' })
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`pkexec exited ${code}`))))
+    child.on('error', reject)
+  }).catch(() => {
+    // pkexec cancelled or failed — getVirtualCameraStatus will report the real state
   })
+
+  return getVirtualCameraStatus(settings.devicePath)
 }
