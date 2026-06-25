@@ -1,6 +1,6 @@
 # Virtual Camera
 
-Aplicacao Electron + React para Linux Wayland que captura uma webcam real, permite trocar o fundo no preview e publica o resultado em uma camera virtual via `v4l2loopback` + FFmpeg.
+Aplicacao Electron + React para Linux X11/Wayland que captura uma webcam real, permite trocar o fundo no preview e publica o resultado em uma camera virtual via `v4l2loopback` + FFmpeg.
 
 ## Escopo Atual
 
@@ -40,7 +40,7 @@ npm install
 npm run dev
 ```
 
-O processo principal define `ELECTRON_OZONE_PLATFORM_HINT=wayland` e usa `--ozone-platform=wayland` para o escopo inicial Linux/Wayland.
+O processo principal verifica `XDG_SESSION_TYPE` ao iniciar. Em Wayland, define `ELECTRON_OZONE_PLATFORM_HINT=wayland`, `--ozone-platform=wayland` e decoracoes Wayland. Em X11, define `ELECTRON_OZONE_PLATFORM_HINT=x11` e `--ozone-platform=x11`.
 
 ## Validacao
 

@@ -36,15 +36,13 @@ export function useWebcam(settings: VirtualCameraSettings): {
   }, [])
 
   useEffect(() => {
-    void refreshDevices()
+    queueMicrotask(() => {
+      void refreshDevices()
+    })
   }, [refreshDevices])
 
   useEffect(() => {
     if (!cameraEnabled) {
-      setStream((current) => {
-        current?.getTracks().forEach((track) => track.stop())
-        return null
-      })
       return
     }
 
@@ -78,7 +76,7 @@ export function useWebcam(settings: VirtualCameraSettings): {
         setError(
           caught instanceof Error
             ? caught.message
-            : 'Falha ao abrir webcam. No Wayland, verifique o XDG Desktop Portal.'
+            : 'Falha ao abrir webcam. Verifique permissoes de camera e integracao do desktop.'
         )
       }
     }
@@ -94,8 +92,24 @@ export function useWebcam(settings: VirtualCameraSettings): {
     return () => stream?.getTracks().forEach((track) => track.stop())
   }, [stream])
 
-  const stopCamera = useCallback(() => setCameraEnabled(false), [])
+  const stopCamera = useCallback(() => {
+    setCameraEnabled(false)
+    setStream((current) => {
+      current?.getTracks().forEach((track) => track.stop())
+      return null
+    })
+  }, [])
   const startCamera = useCallback(() => setCameraEnabled(true), [])
 
-  return { devices, selectedDeviceId, stream, error, cameraEnabled, refreshDevices, setSelectedDeviceId, stopCamera, startCamera }
+  return {
+    devices,
+    selectedDeviceId,
+    stream,
+    error,
+    cameraEnabled,
+    refreshDevices,
+    setSelectedDeviceId,
+    stopCamera,
+    startCamera
+  }
 }

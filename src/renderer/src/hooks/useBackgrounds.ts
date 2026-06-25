@@ -24,7 +24,9 @@ export function useBackgrounds(): {
           const filename = bg.value.replace('app-bg:///', '')
           try {
             const { data, mime } = await window.api.backgrounds.read(filename)
-            const blobUrl = URL.createObjectURL(new Blob([data], { type: mime }))
+            const buffer = new ArrayBuffer(data.byteLength)
+            new Uint8Array(buffer).set(data)
+            const blobUrl = URL.createObjectURL(new Blob([buffer], { type: mime }))
             return { ...bg, value: blobUrl, persistedUrl: bg.value }
           } catch {
             return bg
@@ -51,8 +53,9 @@ export function useBackgrounds(): {
     () =>
       preferences.selectedBackgroundId === 'none'
         ? NONE_BACKGROUND
-        : (preferences.backgrounds.find((background) => background.id === preferences.selectedBackgroundId) ??
-          preferences.backgrounds[0]),
+        : (preferences.backgrounds.find(
+            (background) => background.id === preferences.selectedBackgroundId
+          ) ?? preferences.backgrounds[0]),
     [preferences.backgrounds, preferences.selectedBackgroundId]
   )
 

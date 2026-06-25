@@ -9,13 +9,23 @@ import { checkSystemDependencies } from './modules/deviceDetector'
 import { FfmpegPipe } from './modules/ffmpegPipe'
 import { getPreferences, setPreferences } from './modules/preferencesStore'
 import { getVirtualCameraStatus, loadV4l2Loopback } from './modules/v4l2Manager'
+import { getElectronDisplayServerConfig } from './modules/linuxDisplayServer'
 
-process.env.ELECTRON_OZONE_PLATFORM_HINT = process.env.ELECTRON_OZONE_PLATFORM_HINT || 'wayland'
-app.commandLine.appendSwitch('ozone-platform', 'wayland')
-app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
+const displayServerConfig = getElectronDisplayServerConfig(process.env)
+
+Object.entries(displayServerConfig.env).forEach(([name, value]) => {
+  process.env[name] = process.env[name] || value
+})
+
+displayServerConfig.switches.forEach(({ name, value }) => {
+  app.commandLine.appendSwitch(name, value)
+})
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'app-bg', privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: true } }
+  {
+    scheme: 'app-bg',
+    privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: true }
+  }
 ])
 
 const ffmpegPipe = new FfmpegPipe()
@@ -119,7 +129,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle('dependencies:check', () => checkSystemDependencies())
   ipcMain.handle('v4l2:status', (_event, devicePath?: string) => getVirtualCameraStatus(devicePath))
-  ipcMain.handle('v4l2:load', (_event, settings: VirtualCameraSettings) => loadV4l2Loopback(settings))
+  ipcMain.handle('v4l2:load', (_event, settings: VirtualCameraSettings) =>
+    loadV4l2Loopback(settings)
+  )
   ipcMain.handle('virtual-camera:start', (_event, settings: VirtualCameraSettings) =>
     ffmpegPipe.start(settings)
   )

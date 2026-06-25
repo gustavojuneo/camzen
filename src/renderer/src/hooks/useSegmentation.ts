@@ -12,7 +12,7 @@ async function createSegmenter(delegate: 'GPU' | 'CPU'): Promise<ImageSegmenter>
   return ImageSegmenter.createFromOptions(vision, {
     baseOptions: { modelAssetPath: MODEL_PATH, delegate },
     runningMode: 'VIDEO',
-    outputConfidenceMasks: true,  // float confidence per category
+    outputConfidenceMasks: true, // float confidence per category
     outputCategoryMask: false
   })
 }
@@ -44,7 +44,7 @@ export function useSegmentation({
   const smoothedRef = useRef<Float32Array | null>(null)
   const maskUploadRef = useRef<Uint8Array | null>(null)
   const frameCountRef = useRef(0)
-  const lastFpsAtRef = useRef(performance.now())
+  const lastFpsAtRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -68,7 +68,10 @@ export function useSegmentation({
           segmenter = await createSegmenter('CPU')
         }
 
-        if (cancelled) { segmenter.close(); return }
+        if (cancelled) {
+          segmenter.close()
+          return
+        }
         segmenterRef.current = segmenter
         setStatus('Segmentacao ativa')
       } catch (e) {
@@ -96,7 +99,10 @@ export function useSegmentation({
       const outputCanvas = outputCanvasRef.current
 
       if (
-        video && sourceCanvas && personCanvas && outputCanvas &&
+        video &&
+        sourceCanvas &&
+        personCanvas &&
+        outputCanvas &&
         video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
       ) {
         const segmenter = segmenterRef.current
@@ -133,7 +139,9 @@ export function useSegmentation({
             }
 
             bgMask.close()
-            confidenceMasks.forEach((m, idx) => { if (idx > 0) m.close() })
+            confidenceMasks.forEach((m, idx) => {
+              if (idx > 0) m.close()
+            })
             maskRef.current = { data: upload, width: w, height: h }
           }
         }
@@ -154,6 +162,10 @@ export function useSegmentation({
 
         frameCountRef.current += 1
         const now = performance.now()
+        if (lastFpsAtRef.current === 0) {
+          lastFpsAtRef.current = now
+        }
+
         if (now - lastFpsAtRef.current >= 1000) {
           setFps(frameCountRef.current)
           frameCountRef.current = 0
@@ -169,7 +181,15 @@ export function useSegmentation({
       disposed = true
       cancelAnimationFrame(animationFrame)
     }
-  }, [background, backgroundElement, outputCanvasRef, personCanvasRef, settings, sourceCanvasRef, videoRef])
+  }, [
+    background,
+    backgroundElement,
+    outputCanvasRef,
+    personCanvasRef,
+    settings,
+    sourceCanvasRef,
+    videoRef
+  ])
 
   return { fps, status }
 }
