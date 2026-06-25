@@ -36,7 +36,10 @@ interface GlState {
   }
 }
 
+// WebGL roda num canvas oculto separado do outputCanvas visível,
+// evitando conflito com o contexto WebGL interno do MediaPipe.
 const glCache = new WeakMap<HTMLCanvasElement, GlState>()
+const offscreenCache = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>()
 
 const VERT = /* glsl */ `
   attribute vec2 a_position;
@@ -122,10 +125,25 @@ function makeBuffer(gl: WebGLRenderingContext, data: Float32Array): WebGLBuffer 
   return buf
 }
 
-function getOrCreateGlState(canvas: HTMLCanvasElement): GlState | null {
-  if (glCache.has(canvas)) return glCache.get(canvas)!
+function getOrCreateGlState(outputCanvas: HTMLCanvasElement, width: number, height: number): GlState | null {
+  // Use a separate hidden canvas for WebGL so outputCanvas stays 2D-only
+  let hidden = offscreenCache.get(outputCanvas)
+  if (!hidden) {
+    hidden = document.createElement('canvas')
+    hidden.width = width
+    hidden.height = height
+    hidden.style.display = 'none'
+    offscreenCache.set(outputCanvas, hidden)
+  } else if (hidden.width !== width || hidden.height !== height) {
+    // Resize destroys the WebGL context — recreate
+    hidden.width = width
+    hidden.height = height
+    glCache.delete(hidden)
+  }
 
-  const gl = canvas.getContext('webgl', { alpha: false, antialias: false })
+  if (glCache.has(hidden)) return glCache.get(hidden)!
+
+  const gl = hidden.getContext('webgl', { alpha: false, antialias: false })
   if (!gl) return null
 
   const program = createProgram(gl)
@@ -154,7 +172,7 @@ function getOrCreateGlState(canvas: HTMLCanvasElement): GlState | null {
     }
   }
 
-  glCache.set(canvas, state)
+  glCache.set(hidden, state)
   return state
 }
 
@@ -194,31 +212,7 @@ function renderBlurBg(video: HTMLVideoElement, blurAmount: number, width: number
   return blurCanvas
 }
 
-// ---------------------------------------------------------------------------
-// Máscara suavizada — reutiliza Float32Array entre frames
-// ---------------------------------------------------------------------------
-let smoothedMaskBuffer: Float32Array | null = null
-
-function getSmoothedMask(
-  raw: Float32Array | Uint8Array,
-  size: number,
-  isFloat: boolean
-): Float32Array {
-  if (!smoothedMaskBuffer || smoothedMaskBuffer.length !== size) {
-    smoothedMaskBuffer = new Float32Array(size)
-  }
-  if (isFloat) {
-    smoothedMaskBuffer.set(raw as Float32Array)
-  } else {
-    for (let i = 0; i < size; i++) {
-      smoothedMaskBuffer[i] = (raw as Uint8Array)[i] / 255
-    }
-  }
-  return smoothedMaskBuffer
-}
-
-// Uint8Array reutilizável para upload da máscara na textura
-let maskUploadBuffer: Uint8Array | null = null
+// (mask upload is now done directly from the Uint8Array received from the worker)
 
 // ---------------------------------------------------------------------------
 // composeFrame principal
@@ -238,7 +232,7 @@ export function composeFrame(input: ComposeInput): void {
     return
   }
 
-  const state = getOrCreateGlState(input.outputCanvas)
+  const state = getOrCreateGlState(input.outputCanvas, width, height)
 
   // Se WebGL não disponível, cai no path 2D legado
   if (!state) {
@@ -261,8 +255,6 @@ export function composeFrame(input: ComposeInput): void {
   gl.activeTexture(gl.TEXTURE1)
   gl.bindTexture(gl.TEXTURE_2D, state.bgTexture)
 
-  let bgKind = 0 // solid
-
   if (input.background.kind === 'solid') {
     const [r, g, b] = hexToRgb(input.background.value as string)
     gl.uniform3f(locations.uBgColor, r, g, b)
@@ -272,11 +264,9 @@ export function composeFrame(input: ComposeInput): void {
   } else if (input.background.kind === 'blur') {
     const blurBg = renderBlurBg(input.video, Number(input.background.value) || 18, width, height)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, blurBg)
-    bgKind = 1
     gl.uniform1i(locations.uBgKind, 1)
   } else if (input.backgroundElement) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, input.backgroundElement)
-    bgKind = 1
     gl.uniform1i(locations.uBgKind, 1)
   } else {
     gl.uniform3f(locations.uBgColor, 0.067, 0.094, 0.153) // #111827
@@ -285,18 +275,14 @@ export function composeFrame(input: ComposeInput): void {
 
   gl.uniform1i(locations.uBackground, 1)
 
-  // --- Textura da máscara ---
-  const maskSize = input.maskWidth * input.maskHeight
-  const isFloat = input.mask instanceof Float32Array
-  const floatMask = getSmoothedMask(input.mask, maskSize, isFloat)
-
-  // Converte para Uint8 para upload (LUMINANCE texture)
-  if (!maskUploadBuffer || maskUploadBuffer.length !== maskSize) {
-    maskUploadBuffer = new Uint8Array(maskSize)
-  }
-  for (let i = 0; i < maskSize; i++) {
-    maskUploadBuffer[i] = Math.round(floatMask[i] * 255)
-  }
+  // --- Textura da máscara --- (Uint8Array direto do worker: 0=fundo, 255=pessoa)
+  const maskData = input.mask instanceof Uint8Array
+    ? input.mask
+    : (() => {
+        const buf = new Uint8Array(input.maskWidth * input.maskHeight)
+        for (let i = 0; i < buf.length; i++) buf[i] = Math.round((input.mask as Float32Array)[i] * 255)
+        return buf
+      })()
 
   gl.activeTexture(gl.TEXTURE2)
   gl.bindTexture(gl.TEXTURE_2D, state.maskTexture)
@@ -304,7 +290,7 @@ export function composeFrame(input: ComposeInput): void {
     gl.TEXTURE_2D, 0, gl.LUMINANCE,
     input.maskWidth, input.maskHeight, 0,
     gl.LUMINANCE, gl.UNSIGNED_BYTE,
-    maskUploadBuffer
+    maskData
   )
   gl.uniform1i(locations.uMask, 2)
 
@@ -321,6 +307,13 @@ export function composeFrame(input: ComposeInput): void {
   gl.vertexAttribPointer(locations.texCoord, 2, gl.FLOAT, false, 0, 0)
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+
+  // Copy result from hidden WebGL canvas to the visible outputCanvas (2D context)
+  const hidden = offscreenCache.get(input.outputCanvas)
+  if (hidden) {
+    const ctx2d = input.outputCanvas.getContext('2d')
+    ctx2d?.drawImage(hidden, 0, 0)
+  }
 }
 
 // ---------------------------------------------------------------------------
