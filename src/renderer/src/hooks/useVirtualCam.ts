@@ -59,7 +59,6 @@ export function useVirtualCam(settings: VirtualCameraSettings): {
   )
 
   useEffect(() => {
-    void window.api.v4l2.status().then(setState)
     return () => {
       stopFrameLoop()
     }

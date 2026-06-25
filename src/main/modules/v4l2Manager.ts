@@ -24,7 +24,12 @@ export async function getVirtualCameraStatus(devicePath = '/dev/video10'): Promi
   }
 }
 
-export function loadV4l2Loopback(settings: VirtualCameraSettings): Promise<VirtualCameraState> {
+export async function loadV4l2Loopback(settings: VirtualCameraSettings): Promise<VirtualCameraState> {
+  // If the module is already loaded and the device exists, skip modprobe to
+  // avoid "Conversion failed!" errors on X11 after restarting the app.
+  const current = await getVirtualCameraStatus(settings.devicePath)
+  if (current.active) return current
+
   return new Promise((resolve) => {
     const videoNumber = settings.devicePath.replace('/dev/video', '') || '10'
     const args = [
